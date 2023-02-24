@@ -86,6 +86,8 @@ class MapToOdomPublisher
     std::string global_frame_id_;
     std::string pose_topic_;
 
+    geometry_msgs::TransformStamped last_published_transform_;
+
   public:
 
     void update(const geometry_msgs::TransformStampedConstPtr& message){
@@ -118,6 +120,29 @@ class MapToOdomPublisher
       tf2::convert(odom_to_map_inv, trans.transform);
       m_tfServer->sendTransform(trans);
 
+      {
+        tf2::Matrix3x3 m(odom_to_map_inv.getRotation());
+        double diff_roll, diff_pitch, diff_yaw;
+        m.getRPY(diff_roll, diff_pitch, diff_yaw);
+        ROS_INFO_THROTTLE(1.0, "Published map -> odom correction: x: %.2f m, y: %.2f m, yaw: %.2f rad", odom_to_map_inv.getOrigin().x(), odom_to_map_inv.getOrigin().y(), diff_yaw);
+      }
+
+
+      // Print out the difference between the last published transform and the current one
+      if (last_published_transform_.header.frame_id != "")
+      {
+        tf2::Transform last_published_tf2;
+        tf2::convert(last_published_transform_.transform, last_published_tf2);
+        tf2::Transform diff = last_published_tf2.inverseTimes(odom_to_map_inv);
+        double diff_x = diff.getOrigin().x();
+        double diff_y = diff.getOrigin().y();
+        tf2::Matrix3x3 m(diff.getRotation());
+        double diff_roll, diff_pitch, diff_yaw;
+        m.getRPY(diff_roll, diff_pitch, diff_yaw);
+        ROS_INFO("map -> odom correction diff: x: %.2f m, y: %.2f m, yaw: %.2f rad compared to %.2f s ago", diff_x, diff_y, diff_yaw, trans.header.stamp.toSec() - last_published_transform_.header.stamp.toSec());
+      }
+
+      last_published_transform_ = trans;
     }
 
 };
