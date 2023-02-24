@@ -42,9 +42,22 @@ class MapToOdomPublisher
       private_nh.param("base_frame_id", base_frame_id_, std::string("base_link")); 
       private_nh.param("global_frame_id", global_frame_id_, std::string("map"));     
       private_nh.param("transform_tolerance", transform_tolerance_, 0.1);      
+      private_nh.param("pose_topic", pose_topic_, std::string(""));
       ros::NodeHandle nh;
 
-      pose_sub_ = nh.subscribe("current_pose", 100, &MapToOdomPublisher::update, this);
+      ROS_INFO("odom_frame_id: %s", odom_frame_id_.c_str());
+      ROS_INFO("base_frame_id: %s", base_frame_id_.c_str());
+      ROS_INFO("global_frame_id: %s", global_frame_id_.c_str());
+      ROS_INFO("transform_tolerance: %f", transform_tolerance_);
+      ROS_INFO("pose_topic: %s", pose_topic_.c_str());
+
+      if (pose_topic_.empty())
+      {
+        ROS_ERROR("pose_topic not set");
+        throw std::runtime_error("pose_topic not set");
+      }
+
+      pose_sub_ = nh.subscribe(pose_topic_, 100, &MapToOdomPublisher::update, this);
     }
 
     ~MapToOdomPublisher(void)
@@ -71,12 +84,13 @@ class MapToOdomPublisher
     std::string odom_frame_id_;
     std::string base_frame_id_;
     std::string global_frame_id_;
+    std::string pose_topic_;
 
   public:
 
-    void update(const nav_msgs::OdometryConstPtr& message){
+    void update(const geometry_msgs::TransformStampedConstPtr& message){
       tf2::Transform txi;
-      tf2::convert(message->pose.pose, txi);
+      tf2::convert(message->transform, txi);
 
       geometry_msgs::TransformStamped odom_to_map;
       try
@@ -111,6 +125,8 @@ class MapToOdomPublisher
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "map_to_odom_publisher");
+
+  ROS_INFO("Starting map_to_odom_publisher node...");
 
   MapToOdomPublisher node;
 
