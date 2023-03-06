@@ -139,7 +139,7 @@ class MapToOdomPublisher
         tf2::Matrix3x3 m(diff.getRotation());
         double diff_roll, diff_pitch, diff_yaw;
         m.getRPY(diff_roll, diff_pitch, diff_yaw);
-        ROS_INFO("map -> odom correction diff: x: %.2f m, y: %.2f m, yaw: %.2f rad compared to %.2f s ago", diff_x, diff_y, diff_yaw, trans.header.stamp.toSec() - last_published_transform_.header.stamp.toSec());
+        ROS_DEBUG("map -> odom correction diff: x: %.2f m, y: %.2f m, yaw: %.2f rad compared to %.2f s ago", diff_x, diff_y, diff_yaw, trans.header.stamp.toSec() - last_published_transform_.header.stamp.toSec());
       }
 
       last_published_transform_ = trans;
