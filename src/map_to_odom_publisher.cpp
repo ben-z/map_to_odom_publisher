@@ -43,6 +43,8 @@ class MapToOdomPublisher
       private_nh.param("global_frame_id", global_frame_id_, std::string("map"));     
       private_nh.param("transform_tolerance", transform_tolerance_, 0.1);      
       private_nh.param("pose_topic", pose_topic_, std::string(""));
+      private_nh.param("pose_topic", pose_topic_, std::string(""));
+      private_nh.param("publish_frequency", publish_freq_, 50.0);
       ros::NodeHandle nh;
 
       ROS_INFO("odom_frame_id: %s", odom_frame_id_.c_str());
@@ -58,6 +60,9 @@ class MapToOdomPublisher
       }
 
       pose_sub_ = nh.subscribe(pose_topic_, 100, &MapToOdomPublisher::update, this);
+      publish_timer_ = nh.createTimer(ros::Duration(1.0 / publish_freq_), &MapToOdomPublisher::publish, this);
+
+      last_update_time_ = ros::Time(0);
     }
 
     ~MapToOdomPublisher(void)
@@ -79,6 +84,11 @@ class MapToOdomPublisher
     ros::Subscriber pose_sub_; 
 
     double transform_tolerance_;
+    double publish_freq_;
+    ros::Timer publish_timer_;
+
+    tf2::Transform odom_to_map_inv_;
+    ros::Time last_update_time_;
 
     //parameter for what odom to use
     std::string odom_frame_id_;
@@ -109,22 +119,31 @@ class MapToOdomPublisher
         ROS_ERROR("Failed to transform to %s from %s: %s\n", odom_frame_id_.c_str(), base_frame_id_.c_str(), e.what());
         return;
       }
-
-      geometry_msgs::TransformStamped trans;
-      trans.header.stamp = message->header.stamp + ros::Duration(transform_tolerance_);
-      trans.header.frame_id = global_frame_id_;
-      trans.child_frame_id = odom_frame_id_;
       tf2::Transform odom_to_map_tf2;
       tf2::convert(odom_to_map.transform, odom_to_map_tf2);
-      tf2::Transform odom_to_map_inv = odom_to_map_tf2.inverse();
-      tf2::convert(odom_to_map_inv, trans.transform);
+      odom_to_map_inv_ = odom_to_map_tf2.inverse();
+
+      last_update_time_ = message->header.stamp;
+    }
+
+    void publish(const ros::TimerEvent& event) {
+      if (last_update_time_ == ros::Time(0)) {
+        ROS_INFO_THROTTLE(1.0, "Waiting for initial pose");
+        return;
+      }
+
+      geometry_msgs::TransformStamped trans;
+      trans.header.stamp = ros::Time::now() + ros::Duration(transform_tolerance_);
+      trans.header.frame_id = global_frame_id_;
+      trans.child_frame_id = odom_frame_id_;
+      tf2::convert(odom_to_map_inv_, trans.transform);
       m_tfServer->sendTransform(trans);
 
       {
-        tf2::Matrix3x3 m(odom_to_map_inv.getRotation());
+        tf2::Matrix3x3 m(odom_to_map_inv_.getRotation());
         double diff_roll, diff_pitch, diff_yaw;
         m.getRPY(diff_roll, diff_pitch, diff_yaw);
-        ROS_INFO_THROTTLE(1.0, "Published map -> odom correction: x: %.2f m, y: %.2f m, yaw: %.2f rad", odom_to_map_inv.getOrigin().x(), odom_to_map_inv.getOrigin().y(), diff_yaw);
+        ROS_INFO_THROTTLE(1.0, "Published map -> odom correction: x: %.2f m, y: %.2f m, yaw: %.2f rad", odom_to_map_inv_.getOrigin().x(), odom_to_map_inv_.getOrigin().y(), diff_yaw);
       }
 
 
@@ -133,7 +152,7 @@ class MapToOdomPublisher
       {
         tf2::Transform last_published_tf2;
         tf2::convert(last_published_transform_.transform, last_published_tf2);
-        tf2::Transform diff = last_published_tf2.inverseTimes(odom_to_map_inv);
+        tf2::Transform diff = last_published_tf2.inverseTimes(odom_to_map_inv_);
         double diff_x = diff.getOrigin().x();
         double diff_y = diff.getOrigin().y();
         tf2::Matrix3x3 m(diff.getRotation());
@@ -144,7 +163,6 @@ class MapToOdomPublisher
 
       last_published_transform_ = trans;
     }
-
 };
 
 int main(int argc, char** argv)
