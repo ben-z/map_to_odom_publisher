@@ -43,7 +43,6 @@ class MapToOdomPublisher
       private_nh.param("global_frame_id", global_frame_id_, std::string("map"));     
       private_nh.param("transform_tolerance", transform_tolerance_, 0.1);      
       private_nh.param("pose_topic", pose_topic_, std::string(""));
-      private_nh.param("pose_topic", pose_topic_, std::string(""));
       private_nh.param("publish_frequency", publish_freq_, 50.0);
       ros::NodeHandle nh;
 
