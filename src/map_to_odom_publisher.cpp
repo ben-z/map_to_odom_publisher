@@ -42,7 +42,10 @@ class MapToOdomPublisher
       private_nh.param("base_frame_id", base_frame_id_, std::string("base_link")); 
       private_nh.param("global_frame_id", global_frame_id_, std::string("map"));     
       private_nh.param("transform_tolerance", transform_tolerance_, 0.1);      
-      private_nh.param("pose_topic", pose_topic_, std::string(""));
+      std::string transform_stamped_topic_;
+      private_nh.param("transform_stamped_topic", transform_stamped_topic_, std::string(""));
+      std::string odom_topic_;
+      private_nh.param("odom_topic", odom_topic_, std::string(""));
       private_nh.param("publish_frequency", publish_freq_, 50.0);
       ros::NodeHandle nh;
 
@@ -50,15 +53,18 @@ class MapToOdomPublisher
       ROS_INFO("base_frame_id: %s", base_frame_id_.c_str());
       ROS_INFO("global_frame_id: %s", global_frame_id_.c_str());
       ROS_INFO("transform_tolerance: %f", transform_tolerance_);
-      ROS_INFO("pose_topic: %s", pose_topic_.c_str());
 
-      if (pose_topic_.empty())
-      {
-        ROS_ERROR("pose_topic not set");
-        throw std::runtime_error("pose_topic not set");
+      if (!transform_stamped_topic_.empty()) {
+        ROS_INFO("Using pose from transform_stamped_topic: %s", transform_stamped_topic_.c_str());
+        pose_sub_ = nh.subscribe(transform_stamped_topic_, 100, &MapToOdomPublisher::updateFromTransformStamped, this);
+      } else if (!odom_topic_.empty()) {
+        ROS_INFO("Using pose from odom_topic: %s", odom_topic_.c_str());
+        pose_sub_ = nh.subscribe(odom_topic_, 100, &MapToOdomPublisher::updateFromOdometry, this);
+      } else {
+        ROS_ERROR("No pose topic set");
+        throw std::runtime_error("No pose topic set");
       }
 
-      pose_sub_ = nh.subscribe(pose_topic_, 100, &MapToOdomPublisher::update, this);
       publish_timer_ = nh.createTimer(ros::Duration(1.0 / publish_freq_), &MapToOdomPublisher::publish, this);
 
       last_update_time_ = ros::Time(0);
@@ -93,36 +99,50 @@ class MapToOdomPublisher
     std::string odom_frame_id_;
     std::string base_frame_id_;
     std::string global_frame_id_;
-    std::string pose_topic_;
 
     geometry_msgs::TransformStamped last_published_transform_;
 
   public:
 
-    void update(const geometry_msgs::TransformStampedConstPtr& message){
+    void updateFromOdometry(const nav_msgs::OdometryConstPtr& message) {
+      tf2::Transform txi;
+      tf2::convert(message->pose.pose, txi);
+
+      update(txi, message->header);
+    }
+
+    void updateFromTransformStamped(const geometry_msgs::TransformStampedConstPtr& message){
       tf2::Transform txi;
       tf2::convert(message->transform, txi);
 
+      update(txi, message->header);
+    }
+
+    void update(const tf2::Transform& txi, const std_msgs::Header& msg_header) {
       geometry_msgs::TransformStamped odom_to_map;
       try
       {
         geometry_msgs::TransformStamped txi_inv;
         txi_inv.header.frame_id = base_frame_id_;
-        txi_inv.header.stamp = message->header.stamp;
+        txi_inv.header.stamp = msg_header.stamp;
         tf2::convert(txi.inverse(), txi_inv.transform);
 
         m_tfBuffer->transform(txi_inv, odom_to_map, odom_frame_id_, ros::Duration(transform_tolerance_));
       }
       catch(tf2::TransformException &e)
       {
-        ROS_ERROR("Failed to transform to %s from %s: %s\n", odom_frame_id_.c_str(), base_frame_id_.c_str(), e.what());
+        if (last_update_time_ == ros::Time(0)) {
+          ROS_INFO_THROTTLE(1.0, "Input message received before the %s->%s transform is available. Waiting for the transform. TransformException: %s", odom_frame_id_.c_str(), base_frame_id_.c_str(), e.what());
+        } else {
+          ROS_ERROR("Failed to transform to %s from %s: %s\n", odom_frame_id_.c_str(), base_frame_id_.c_str(), e.what());
+        }
         return;
       }
       tf2::Transform odom_to_map_tf2;
       tf2::convert(odom_to_map.transform, odom_to_map_tf2);
       odom_to_map_inv_ = odom_to_map_tf2.inverse();
 
-      last_update_time_ = message->header.stamp;
+      last_update_time_ = msg_header.stamp;
     }
 
     void publish(const ros::TimerEvent& event) {
